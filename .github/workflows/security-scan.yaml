@@ -1,9 +1,6 @@
 name: Security Scan
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -33,15 +30,25 @@ jobs:
       - name: Run Semgrep Security Scan
         run: semgrep --config=auto --error --json > semgrep-report.json || true
 
-      # ✅ Use updated upload-artifact@v4
-      - name: Upload Semgrep Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-report
-          path: semgrep-report.json
+      - name: Analyze Security Reports
+        id: analyze_results
+        run: |
+          CRITICAL_FOUND=$(grep -E 'CRITICAL|HIGH' bandit-report.txt | wc -l)
+          if [[ "$CRITICAL_FOUND" -gt 0 ]]; then
+            echo "CRITICAL_VULN=true" >> $GITHUB_ENV
+          else
+            echo "CRITICAL_VULN=false" >> $GITHUB_ENV
+          fi
 
-      - name: Upload Bandit Report
-        uses: actions/upload-artifact@v4
+      - name: Block PR if Critical Vulnerability Found
+        if: env.CRITICAL_VULN == 'true'
+        uses: actions/github-script@v7
         with:
-          name: bandit-report
-          path: bandit-report.txt
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "Block: Critical vulnerabilities detected in the security scan."
+            });
+            core.setFailed("Critical vulnerabilities found. Blocking PR.")
